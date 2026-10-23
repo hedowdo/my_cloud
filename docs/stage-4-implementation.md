@@ -1,0 +1,32 @@
+# Stage 4 implementation - 2026-10-22
+
+Owner authorized "ok lets proceed with stage 4" after the file-backend scope explanation. Branch stage-4-file-service. Scope is local backend only: staged multipart uploads, private generated storage keys, checksummed attachment downloads, shared folders/metadata, rename/move, collision decisions, retained replacement recovery, trash/restore, administrator-confirmed deletion journals, bounded file activity and capacity endpoints. No Stage 5 file UI, production deployment, merge or cloud provisioning.
+
+## Milestones and gates
+
+- [x] Add immutable 0003_files/0004_transfer_parents migrations and strict metadata contracts; preserve existing identity/data. Test empty/repeated upgrade, populated rollback guards and dump/restore.
+- [x] Implement bounded streaming, full 500,000,000-byte limits, declared-size reservations, checksums, fsync/atomic finalization and failed/uncertain-commit recovery. Test arbitrary binaries, exact byte boundaries, truncation, unknown/misleading Content-Length, revoked access and actual filesystem/DB failures.
+- [x] Implement locked namespace, explicit collision handling, revisions, retained old blobs, root/cycle/depth protection, subtree trash/restore and missing-parent handling. Test races, stale changes and recovery-copy integrity.
+- [x] Implement quota/disk-reserve accounting and four-global/two-per-user upload admission. Count trash/recovery/deleting bytes; test 80/90 warnings, near-full capacity, concurrent reservation and disk-space loss during upload.
+- [x] Implement administrator-confirmed durable deletion jobs, resumable partial filesystem failure, private attachment downloads and meaningful file activity. Test member/anonymous denial, retry, download interruption and exclusion of security events from shared activity.
+- [x] Run full PostgreSQL and Linux Compose integration/recovery checks, source quality/dependency/secret scans; record outcomes and only then complete Stage 4.
+
+## Protocol and integrity decisions
+
+POST /api/uploads streams exactly two multipart parts: bounded metadata JSON first (name, parent_id, size_bytes, collision and optional explicit replacement target/revision/confirmation), then file bytes. The multipart filename is ignored for storage/naming; metadata uses normalized validated names. JSON metadata is capped at 4 KiB and part headers at 8 KiB. Input is fed to python-multipart in at most 64 KiB slices; no framework UploadFile/full-file buffering. A 30-second receive idle timeout and two-hour reservation lifetime bound stalled work. Tokens and names do not enter request logs. New parser dependency is hash locked and audited; official callback reference: https://multipart.fastapiexpert.com/api/.
+
+All namespace/quota transitions take the singleton PostgreSQL row lock, with active session/role/CSRF checked inside that transaction. Four active transfer leases plus one metadata connection fit the current five-connection pool. Each active upload holds a separate PostgreSQL advisory lease; abandoned-data reconciliation takes a nonblocking matching lock and skips active writers, including across processes. A separate database advisory lock serializes disk-space checks and each physical chunk write. Real disk free space and all reservations are checked before admission; actual writes are checked again so external disk consumption stops the transfer before the emergency reserve is used.
+
+Local defaults deliberately use a 1,000,000,000-byte shared pool and 2,000,000,000-byte emergency reserve on the actual local filesystem. This does not claim 100 GB is provisioned/usable. Configured production capacity requires the later verified OCI disk ledger; no cloud changes here. Test-only small limits/disk probes are injected on disposable storage, never by filling the owner's disk.
+
+New bytes are flushed/fsynced and renamed on the same filesystem before metadata publication. A failed transaction preserves the previous visible version; cleanup unlinks unpublished bytes only after a fresh locked DB read proves no reference, protecting uncertain commits. Replacement keeps the original item ID, increments its revision and retains its old blob as a trashed recovery item, still counted against quota. No auto-purge. Reconciliation on startup/before uploads and the local maintenance CLI reclaims only abandoned unpublished records older than two hours or resumes previously confirmed deletion jobs. It never empties ordinary trash.
+
+Permanent deletion first records an approved job and marks the entire selected trashed subtree unavailable, then unlinks only blobs not referenced outside that job. Partial failure keeps durable intent and quota charged; retry handles already-missing bytes. Metadata/audit completion follows successful unlink. Concurrent open downloads retain file descriptors; Windows may defer deletion until the handle closes, while Unix can unlink an open file without interrupting its reader. Actual disk free space remains the physical safeguard in either case.
+
+Names are NFC, casefolded for collisions, 1-255 UTF-8 bytes; paths/control characters/dot names/outer whitespace/trailing dots are rejected. Nesting is bounded at 64 and one subtree mutation at 10,000 items. Browse/trash/activity use stable ordering, bounded limit/offset; richer filter/sort/cursor UX remains Stage 5. Download events state server stream completion/interruption, never confirmed device receipt. Byte responses are authenticated application/octet-stream attachments with encoded disposition and restrictive CSP; no inline previews or executable content.
+
+Risks tested explicitly: DB/filesystem non-atomicity, upload/delete races, stale replacement, reserve exhaustion, malformed multipart and partial deletion. Power-loss guarantees depend on filesystem fsync support; Windows tests supplement Linux container acceptance and do not prove OCI/ARM64 operation.
+
+Concurrency correction: deleting a destination must not drop an active transfer slot or byte reservation. Revision 0004_transfer_parents retains the reservation with a null destination FK; its original validated intent remains, finalization rejects the deleted destination, and only transfer cleanup/reconciliation releases the reserved bytes. The earlier applied 0003 migration is preserved unchanged.
+
+All local gates passed; executed evidence and remaining release limitations: [Stage 4 verification](stage-4-verification.md).

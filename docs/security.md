@@ -1,0 +1,82 @@
+# Security baseline and threat model
+
+The Stage 3 stack remains development-only and binds published ports to loopback. Identity and administrator policies are implemented; public TLS, host/image hardening and recovery remain release gates. The application refuses APP_ENV other than development.
+
+Threats: internet brute-force/credential stuffing, compromised member, stolen invite/session, CSRF/XSS, ID enumeration, malicious file/icon/preview, traversal, concurrent namespace writes, exhausted disk/memory, leaked secrets/logs/backups, failed migration and provider/account loss.
+
+| Boundary | Required protection / implementation stage |
+| --- | --- |
+| Identity | Stage 3 Argon2id passwords, hashed high-entropy session/invite tokens, 24h single-use revocable invitations, transactional five-user cap, idle/absolute expiry and logout/deactivation revocation. |
+| Browser/API | Stage 3 Secure/HttpOnly/SameSite cookies, CSRF token+origin checks, strict same-origin/CORS; Stage 8 public HTTPS and secure headers. Stage 2 proxy has no wildcard CORS or third-party scripts. |
+| Authorization | Every byte/metadata/admin route enforces active-user and role rules on server. Admin-only permanent delete and invite/user management; hidden UI is never sufficient. No protected feature route exists in Stage 2. |
+| File storage | Stage 4 generated private keys, streaming byte/quota checks, same-filesystem durable finalization and crash lifecycle. All types accepted as inert bytes; no shell execution/server evaluation. No direct static access to file volume. |
+| Previews/icons | Stage 5 allowlisted formats; attachment defaults, safe disposition, nosniff and isolated preview context. Raster icons decode/re-encode with dimension/pixel/size limits; no active SVG/HTML. PDF/video processing bounded and lazy. |
+| Database | Stage 2 separate bootstrap/migrator/runtime roles and parameterized SQL. No external DB port. Later features add table-specific audit constraints and service authorization. Migrations never run from runtime requests. |
+| OS/network | Stage 8 non-root app/proxy, least-privilege DB, narrow SSH /32 with public-key auth, firewall web-only, updates, restart and outside-VM alerts. No live cloud changes performed by Stage 2. |
+| Backups | Stage 7 daily app-consistent encrypted recovery with separately held keys; restore actually tested. Same Oracle account/region risk remains a disclosed compromise. |
+
+## Secrets and diagnostics
+
+Stage 2 contract defaults for later features: first-administrator bootstrap is a local interactive CLI, never a public setup endpoint. It accepts the initial email and password through prompts (password hidden, never a command-line argument), hashes with Argon2id, and creates the first administrator only when the users table is empty under the shared transaction lock. An existing user prevents bootstrap; subsequent administrator/account changes require authenticated administrator authorization. No default account or password is seeded. Implemented in Stage 3 and exercised against disposable PostgreSQL; see `stage-3-verification.md`.
+
+Preview allowlist baseline: decoded JPEG, PNG and WebP images; PDF in a restricted sandboxed viewer; MP4/WebM only when the browser supports the actual validated media. Unsupported/mislabeled formats remain attachments. SVG, HTML, XML and executable/active documents never become same-origin inline content. Preview responses use restrictive CSP/nosniff and attachment fallback; no untrusted script, same-origin sandbox escape or arbitrary embedded navigation. Custom icons are decoded/re-encoded raster images with enforced byte/dimension/pixel limits. Stage 5 must prove safe delivery and hostile-file behavior before exposing previews; this paragraph does not claim a viewer exists.
+
+`scripts/init_dev.py` creates random development credentials in ignored `.env` without overwriting existing files or printing values. `.env.example` contains blank safe fields. Never place production data/secrets under this OneDrive-synced working tree; use an explicitly approved production secret store outside Git/OneDrive. Generated dev-only config is not a production secret-management plan. Windows permissions differ from Unix mode bits; protect the local profile and review ACLs for sensitive files before using real credentials.
+
+The API logs a fresh request ID, UTC timestamp, severity, method, status and duration. It does not log request bodies, arbitrary client IDs, full URLs/query strings, credentials, file names/contents or raw DB exceptions. Uvicorn access logs are disabled in the container to avoid URL leakage. Public errors never return internal exceptions. Future secure diagnostics must add actionable redacted failure codes rather than log full sensitive exceptions.
+
+Offline pre-commit secret-pattern hook scans staged content before commit; `scripts/scan_secrets.py` scans tracked/untracked non-ignored files on demand. This is heuristic; manual review and dependency scanning remain required. No hook is claimed installed until executed successfully. Rotate compromised credentials through an approved procedure; do not rewrite/delete user history without approval.
+
+Dependency locks are committed; uploads, databases, virtualenvs, downloaded binaries, caches and actual `.env` are ignored. Container images are explicit version tags; validate manifest availability and advisories before local acceptance, and pin immutable multiarchitecture digests before production. No auto-upgrade, cloud account upgrade, paid plugin or deployment automation.
+
+## Implemented Stage 3 protections
+
+Argon2id uses 64 MiB, three passes and one lane with two concurrent hash slots. Unknown and inactive login failures are generic; unknown accounts still perform dummy verification. Passwords are not trimmed; registration requires 12-128 characters and a validated email, casefolded for uniqueness. Bootstrap is an interactive CLI only; there is no public setup or signup route and no seeded administrator.
+
+Session and invitation values each contain 256 random bits; only SHA-256 digests are stored. Sessions expire after 24 hours idle or seven days absolute, rotate on login/redemption, and are revoked on logout/deactivation or administrator session revocation. Active-user/administrator/CSRF checks run server-side. Namespace row locking serializes identity mutations, registration count and invitation redemption. Five registered users includes inactive accounts. Invitations expire after 24 hours, are single use/revocable, capped at 20 outstanding; lists disclose metadata only, with a 100-row bound.
+
+Default session cookie is __Host-pc_session: Secure, HttpOnly, host-only, Path=/, SameSite=Strict. __Host-pc_csrf is readable and equally scoped; its header must match the digest for the authenticated session. Mutations additionally require an exact allowed Origin. The Compose-only explicit development loopback exception uses pc_session_dev/pc_csrf_dev without Secure; configuration refuses this exception with non-loopback origins or production mode. Do not expose the local stack. Production HTTPS and Secure-cookie browser verification remain Stage 8 gates.
+
+Identity mutation bodies are actual-byte bounded at 16 KiB, including chunked requests; JSON is mandatory. Strict input schemas reject extra privilege fields. Allowed Host values are configured-origin hosts and local loopback health probes. No wildcard CORS or forwarded-IP trust. Login allows 10 attempts per normalized email and 30 per socket peer per 15-minute bucket; redemption allows 30 per peer. HMAC keys obscure email/peer values in stored counters. Bucket allocation is serialized, expired buckets cleared on attempts and count bounded at 4096 (saturation conservatively rejects authentication). Failed auth attempts still commit counters. A shared local proxy shares the peer budget; reviewed trusted-proxy/client-IP and capacity configuration is required before public release.
+
+Invitation bearer values are fragments, removed from the address before rendering; React holds them in memory, never local/session storage. Refreshing an unfinished signup requires reopening the original link. The generated link is cleared when Done is clicked or the administrator signs out. Logs omit URLs, bodies, cookies and email. API errors are generic structured envelopes with request IDs. Security audit actions are retained in activity, excluded from future ordinary file-history views. The Stage 3 downgrade refuses a database containing new security audit actions; restore a tested backup instead of deleting history.
+
+## Implemented Stage 4 file controls
+
+All file metadata/content access requires an active server session; JSON/multipart mutations enforce exact Origin and session-bound CSRF. Shared space grants normal file operations to active members; only administrators can request confirmed permanent deletion or inspect its jobs. Root/cycle/depth/subtree limits and optimistic revisions are checked server-side under the namespace lock. All SQL uses bound values; nullable UUID collision filters are explicitly typed.
+
+File paths use generated 64-hex keys below private .staging/.objects directories, never client filenames. Private directories/files use restrictive creation modes, symlink checks and O_NOFOLLOW where supported; opened files must be regular and match metadata size. The root is trusted local configuration and the storage UID remains a privileged trust boundary. Multipart names/headers/body/file bytes and metadata are separately bounded; upload receives are backpressured through bounded parser chunks. No uploaded type is executed. Downloads always use application/octet-stream attachment plus restrictive CSP/nosniff and encoded Content-Disposition; arbitrary HTML/SVG/executables are inert attachments.
+
+Quota includes active/trash/recovery/deleting bytes plus separate active reservations. Admission/concurrency is atomic; physical disk checks and actual writes are serialized and bounded by the emergency reserve. Active transfer advisory leases exclude abandoned-data reclamation. Final publication rechecks session/destination/revision; a fresh reference check protects cleanup after uncertain commits. Permanent deletion uses durable, admin-confirmed jobs and checks outside references before unlink. Ordinary trash is never automatically purged. Response allowlists and file-only audit action lists keep private storage keys and identity/security history out of member API responses.
+
+Known-advisory/dependency and secret-pattern checks supplement tests. Production permission/host/disk provisioning, ARM64 and HTTPS/trusted-proxy acceptance remain release gates; no claim of general public deployment readiness is made from this local implementation.
+
+## Stage 5 content and UI boundary
+
+Only format-allowlisted private media endpoints can render inline. Never render user-supplied HTML/SVG, trust a multipart MIME type, use iframe/object PDF embedding or run PDF actions. Raster decoding accepts only PNG/JPEG/WebP under byte/pixel caps, with two concurrent image jobs per API process; it copies fresh pixels to PNG without metadata. Metadata-heavy PNGs also have bounded text chunks. Original files stay downloadable unchanged. PDF.js 6.4.299 is locally bundled/lazy-loaded, canvas-only, no viewer scripting/form/annotation layer; strict CSP excludes unsafe-eval/inline scripts. The obsolete isEvalSupported option was removed from this version's API, so it is not falsely claimed as a configured flag. Document/page preparation times out, decoded image/canvas area is bounded, and workers are destroyed on close.
+
+Icons require Origin/CSRF/active membership, actual-byte cap and current revision. Existing icon bytes remain referenced until replacement commits; retired unreferenced bytes are journaled before unlink and remain charged until cleanup. Authenticated preview/icon requests check live ancestry on every new request, including Range. Snapshot streams may finish if access is revoked after opening, matching existing download semantics. No public URLs or external media hosts are introduced.
+
+The shared circle endpoint exposes only up to five id/email labels to active members for attribution, including historical uploaders; no account controls/session data are exposed. Administrator routes enforce roles on the server. New source/dependency/browser acceptance is recorded in stage-5-verification.md; production hardening remains a release gate.
+
+## Stage 6 placement boundary
+
+Placement reads and initialization validate live folder ancestry. All coordinate writes recheck active membership and CSRF/Origin inside the locked transaction. Strict models reject extra fields, strings/booleans for coordinates, nonfinite numbers, out-of-range coordinates, negative/boolean revisions and over-500 initialization arrays. Only requested live direct children may be auto-placed. Stale file/position revision or parent mismatch returns conflict; hidden/trashed ancestors cannot be repositioned. The metadata body byte boundary remains 16 KiB. Position responses expose item ID, x/y and revision only. Neither browser transforms nor uploaded icons create HTML/script content. Existing least-privilege runtime role and private loopback ports are retained.
+
+
+## Stage 7 local security review (2026-10-23)
+
+The full local PostgreSQL-backed tests exercised active/inactive membership, invitation expiry/reuse/max-user limits, session expiry/logout, administrator isolation, strict metadata/CSRF/Origin boundaries, upload/storage admission, previews/icons, trash/delete permissions and position revisions. Browser role checks and actual file recovery passed. This is evidence of local tested controls, not a public penetration test or proof of absence of vulnerabilities.
+
+Actual containers retain API/frontend/migration UID 10001, dropped capabilities/no-new-privileges, loopback published ports/private database and now bounded logs for every service. Database uses its standard image startup path; no claim of dropped database-container capabilities. Current locks and the installed API package inventory had no known advisory findings; OS/base-image scanning, ARM64 execution and supported production cryptographic binary review remain open.
+
+Backup keys stay outside encrypted bundles and are passed through private stdin; local scratch is private. File extraction validates path/type/hash/size before publishing to a new destination. Interrupted/unindexed points, changed keys or corrupt retained points block blind rotation, and capture failure preserves prior points. Restored tables remain migration-role-owned; API-file restoration uses the unprivileged API user. No source role/grant/file permissions were weakened to pass recovery.
+
+Open release gates: current startup deliberately rejects production mode; development HTTP/proxy/loopback-cookie settings are not public deployment settings. Host/TLS/SSH/firewall/proxy trust, data-volume binding for all persistent state, secret provisioning, image/OS/ARM64 review, native backup capture/retention, independent key custody, outside-VM alert delivery and measured full-size recovery must pass before public operation. Review source IP handling at the final proxy boundary; don't assume a reverse proxy automatically makes every client-IP rate bucket accurate. No account/provider-loss protection is claimed for same-OCI-region backups.
+
+[Executed checks](stage-7-verification.md), [recovery/key/cutover runbook](recovery-runbook.md).
+
+
+## Stage 8 production preparation (2026-10-23)
+
+Supersedes the historical development-only startup gate above: explicit production Settings now permits startup only with one public HTTPS origin, secure cookies, an absolute storage root and cloud_app runtime role. Production bootstrap stays interactive/one-admin-only. The separate production Compose profile publishes only Caddy 80/443, keeps API/DB private, trusts forwarded headers only from its fixed internal Caddy address and uses data binds that refuse source creation. API/frontend/migration have read-only roots and bounded tmpfs. Local TLS, spoofed-header rejection, production authentication and container-replacement persistence passed in isolation. Actual Linux mounts/boot ordering, public ACME/renewal, host/ARM64/native backups/alerts/recovery remain release gates; the working preview still uses development configuration. [Deployment](deployment.md), [evidence](stage-8-verification.md).

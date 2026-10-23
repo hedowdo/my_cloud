@@ -1,0 +1,9 @@
+packages:
+  - frontend
+minimumReleaseAge: 1440
+onlyBuiltDependencies:
+  - esbuild
+
+# Browser PDF previews use HTML canvas; no native Node canvas is needed.
+ignoredOptionalDependencies:
+  - '@napi-rs/canvas'

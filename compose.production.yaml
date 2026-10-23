@@ -1,0 +1,115 @@
+name: personal-cloud-production
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: 10m, max-file: '3'}
+
+x-hardening: &hardening
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging: *logging
+
+services:
+  database:
+    image: ${DATABASE_IMAGE:?Set an approved immutable PostgreSQL image}
+    environment:
+      POSTGRES_DB: cloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Required}
+      MIGRATION_PASSWORD: ${MIGRATION_PASSWORD:?Required}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?Required}
+    volumes:
+      - type: bind
+        source: ${DATA_ROOT:?Mounted data volume required}/postgres
+        target: /var/lib/postgresql/data
+        bind: {create_host_path: false}
+      - ./infrastructure/postgres/init-roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d cloud']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    logging: *logging
+    networks: [backend]
+
+  migrate:
+    <<: *hardening
+    image: ${API_IMAGE:?Set an approved immutable API image}
+    command: [alembic, -c, backend/alembic.ini, upgrade, head]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://cloud_migrator:${MIGRATION_PASSWORD:?Required}@database:5432/cloud
+    depends_on:
+      database: {condition: service_healthy}
+    networks: [backend]
+    restart: 'no'
+    read_only: true
+    tmpfs: ['/tmp:size=64m,mode=1777']
+
+  api:
+    <<: *hardening
+    image: ${API_IMAGE:?Required}
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8000'
+      - --no-access-log
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - '172.29.86.10'
+    environment:
+      DATABASE_URL: postgresql+psycopg://cloud_app:${APP_DATABASE_PASSWORD:?Required}@database:5432/cloud
+      APP_ENV: production
+      STORAGE_ROOT: /srv/storage
+      STORAGE_POOL_BYTES: ${STORAGE_POOL_BYTES:?Measured pool required}
+      STORAGE_RESERVE_BYTES: ${STORAGE_RESERVE_BYTES:?Measured reserve required}
+      AUTH_RATE_SECRET: ${AUTH_RATE_SECRET:?Required}
+      INSECURE_LOOPBACK_COOKIES: 'false'
+      ALLOWED_ORIGINS: '["https://${CLOUD_HOST:?DNS hostname required}"]'
+    volumes:
+      - type: bind
+        source: ${DATA_ROOT:?Required}/files
+        target: /srv/storage
+        bind: {create_host_path: false}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/api/health/ready", timeout=4)']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [backend]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ['/tmp:size=64m,mode=1777']
+
+  frontend:
+    <<: *hardening
+    image: ${FRONTEND_IMAGE:?Set an approved immutable frontend image}
+    environment:
+      CLOUD_HOST: ${CLOUD_HOST:?Required}
+    volumes:
+      - ./infrastructure/Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - type: bind
+        source: ${DATA_ROOT:?Required}/caddy
+        target: /data
+        bind: {create_host_path: false}
+    ports: ['80:80', '443:443']
+    sysctls: {net.ipv4.ip_unprivileged_port_start: '0'}
+    tmpfs: ['/config:uid=10001,gid=10001,mode=700', '/tmp:size=32m,mode=1777']
+    read_only: true
+    depends_on:
+      api: {condition: service_healthy}
+    networks:
+      backend: {ipv4_address: 172.29.86.10}
+      edge: {}
+    restart: unless-stopped
+
+networks:
+  backend:
+    internal: true
+    ipam:
+      config: [{subnet: 172.29.86.0/24}]
+  edge: {}

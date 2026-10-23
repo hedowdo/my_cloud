@@ -1,0 +1,92 @@
+name: personal-cloud-dev
+
+x-bounded-logging: &bounded-logging
+  driver: json-file
+  options: {max-size: 10m, max-file: '3'}
+
+services:
+  database:
+    logging: *bounded-logging
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_DB: cloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/init_dev.py first}
+      MIGRATION_PASSWORD: ${MIGRATION_PASSWORD:?Run scripts/init_dev.py first}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?Run scripts/init_dev.py first}
+    volumes:
+      - database_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d cloud']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks: [private]
+
+  migrate:
+    logging: *bounded-logging
+    build:
+      context: .
+      dockerfile: infrastructure/api.Dockerfile
+    command: [alembic, -c, backend/alembic.ini, upgrade, head]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://cloud_migrator:${MIGRATION_PASSWORD:?Required}@database:5432/cloud
+    depends_on:
+      database:
+        condition: service_healthy
+    networks: [private]
+    restart: 'no'
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://cloud_app:${APP_DATABASE_PASSWORD:?Required}@database:5432/cloud
+      APP_ENV: development
+      STORAGE_ROOT: /srv/storage
+      STORAGE_POOL_BYTES: ${STORAGE_POOL_BYTES:-1000000000}
+      STORAGE_RESERVE_BYTES: ${STORAGE_RESERVE_BYTES:-2000000000}
+      AUTH_RATE_SECRET: ${AUTH_RATE_SECRET:?Run scripts/init_dev.py --add-auth-secret}
+      INSECURE_LOOPBACK_COOKIES: 'true'
+      ALLOWED_ORIGINS: '["http://127.0.0.1:8080","http://127.0.0.1:5173"]'
+    volumes:
+      - file_data:/srv/storage
+    ports: ['127.0.0.1:8000:8000']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/api/health/ready", timeout=4)']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [private]
+    logging: *bounded-logging
+
+  frontend:
+    logging: *bounded-logging
+    build:
+      context: .
+      dockerfile: infrastructure/frontend.Dockerfile
+    ports: ['127.0.0.1:8080:8080']
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [private]
+
+networks:
+  private:
+
+volumes:
+  database_data:
+  file_data:

@@ -1,0 +1,37 @@
+# Stage 4 local verification - 2026-10-22
+
+Scope: owner-authorized durable file backend on branch `stage-4-file-service`. No cloud resources, deployment, main merge or Stage 5 file UI. Existing volumes and actual local secrets were preserved. Tests use isolated databases, generated file roots and synthetic users only.
+
+## Acceptance evidence
+
+- Final native PostgreSQL suite at schema `0004_transfer_parents`: **53 passed before and 53 passed after real backup/restore**. Evidence: ignored `.local/verification/2e3fa7f44738`. Migration idempotence, runtime-role restrictions, populated rollback refusal without schema change, empty downgrade/re-upgrade, process restart and real pg_dump/pg_restore all passed. An earlier focused 50-test run at this revision also passed before/after restore (`.local/verification/7e993d9b0a73`).
+- Full suite at revision 0003 passed 53 tests before/after restore (`.local/verification/b5645076e7ee`). Final revision 0004 is independently rerun rather than relying on that earlier result.
+- Linux Compose foundation passed in disposable project `cloud-stage4-3f3a20f86e7b`: healthy proxy/API/database, private database/loopback ports, runtime role/non-root restrictions, persistence across all-container recreation and real container database recovery.
+- Final Linux file acceptance passed after revision 0004: proxied binary upload/checksum download; retained replacement and restoration; rename; pending deletion across all-container recreation and retry; coordinated file/database snapshot restored into an isolated database/root with matching checksum. Evidence: ignored `.local/compose-verification/3f3a20f86e7b/files-acceptance.json` and private command logs.
+- Actual HTTP chunked **500,000,000-byte** upload and streamed download passed. API process peak RSS was **138376 KiB before and after** the roundtrip. This bounds observed API memory in this test; it does not measure every process, client or host memory.
+- Five existing frontend tests passed; TypeScript/Vite build, ESLint and Prettier passed. The browser file interface remains a Stage 5 deliverable.
+- Ruff lint/format passed for 33 Python files. Secret pattern scanning and pip check passed. Hash-locked Python and pnpm advisory checks passed during dependency installation; final actual Linux API inventory (29 distributions) also reported no known advisories. This is not an OS-image security audit or proof that unknown vulnerabilities do not exist.
+
+Reproduction: `.venv/Scripts/python.exe scripts/verify_postgres.py --bin-dir .cache/postgres-runtime/pgsql/bin`; with the approved local Docker runtime on PATH, `scripts/verify_compose.py` creates its own disposable project, then `scripts/verify_files_compose.py` runs the file acceptance using that exact project's private synthetic fixture. These scripts refuse arbitrary/nonlocal database or Docker targets. Large-file cases write real bytes and clean their generated test files; do not substitute buffers or mocked size counters.
+
+## Integrity and permission coverage
+
+The 53-test backend suite includes the prior 24 identity tests and 29 file cases (including parametrized invalid names). File cases exercise arbitrary binary checksums, safe attachment headers/public metadata, 499999999/500000000/500000001 actual bytes without Content-Length, malformed/truncated/extra multipart parts, declared/actual size mismatch, misleading Content-Length, metadata validation, quota warning thresholds, concurrent reservation and collision races, stale revisions/replacements, two-per-user/four-global admission, real free-space admission and simulated midstream disk loss, revoked sessions, root/cycle/subtree guards, missing-parent restore, replacement recovery, administrator-only confirmed deletion, partial unlink/retry, interrupted downloads, open download handles, namespace changes during upload, filesystem publication failures, DB errors and uncertain committed publication.
+
+Reconciliation skips a live writer's advisory lease, cleans abandoned unpublished data after the configured timeout and resumes approved deletion jobs. Trash/recovery data is never automatically purged. Download activity records server stream completion/interruption; device receipt cannot be proven.
+
+## Observed failures and targeted corrections
+
+1. Initial real-PostgreSQL file calls failed because an untyped nullable exclusion bind in collision SQL had no inferable PostgreSQL type. Explicit UUID casting corrected the query; collision and full regression cases then passed.
+2. Recovery harness assertions initially assumed that each rollback failure left every prior revision unchanged, and that restored root folders were empty. Alembic had legitimately rolled back an empty later revision before an earlier populated-history guard; the harness now seeds lifecycle data at the head revision and checks refusal there. Existing foundation marker folders are preserved; tests select their own generated item IDs. A JSON bind ambiguity in the synthetic seed was replaced with jsonb_build_object. These were harness defects, not evidence of lost application data.
+3. A new regression proved that permanently deleting an active upload's parent prematurely reduced reserved bytes from 3 to 0. The parent FK used ON DELETE CASCADE. New immutable revision `0004_transfer_parents` uses a nullable ON DELETE SET NULL parent, retaining the transfer slot and bytes until the stream closes or abandoned-transfer reconciliation runs; finalization rejects the removed destination. Applied revision 0003 was not rewritten. The exact reservation assertion and native recovery regression now pass.
+4. The first Linux acceptance completed its 500 MB/integrity/recovery checks but the harness expected logout 200 instead of the documented 204. Corrected the assertion and repeated the full Linux acceptance successfully. Repeat runs reuse credentials only for the exact disposable project; they never reset existing users.
+5. A final package-inventory command initially failed because of Windows argument quoting (and a guessed virtualenv path). Using the verified container `python` and single-quoted metadata expressions generated the 29-package inventory; the actual audit then passed. An earlier missing-file audit invocation is not counted as a passing scan.
+
+## Limits and release gates
+
+All acceptance is local Windows/PostgreSQL plus Linux amd64 Compose. ARM64/OCI execution, public HTTPS/DNS, host/image hardening, current Always Free eligibility and capacity, measured 100 GB usable storage, automatic encrypted daily off-server backups, full-size cloud restoration and alert delivery remain later release gates. Local snapshot restoration is supplemental evidence, not daily backup completion. Strict $0 operation has not been established by these tests; no paid service or cloud resource was created.
+
+The development pool is 1,000,000,000 bytes with a 2,000,000,000-byte emergency reserve. Production capacity must derive from the verified disk ledger. Browse/activity are bounded basic APIs; richer filtering/sorting, previews, custom icons and all file screens remain Stage 5. Filesystem durability depends on fsync support; downloads validate blob type/length, without recomputing the checksum on every read. Wider corruption detection and operational recovery belong to Stage 7.
+
+Stage 4 local acceptance is complete. Checklists in plan.md and stage-4-implementation.md are marked only after the final revision passed the complete suite and Linux acceptance. Stage 5 requires owner approval.

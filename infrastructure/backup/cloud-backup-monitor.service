@@ -1,0 +1,18 @@
+[Unit]
+Description=Check local backup state and write a bounded private failure alert
+ConditionPathExists=/etc/my-cloud/REHEARSAL_ONLY
+
+[Service]
+Type=oneshot
+User=mycloud-backup
+Group=mycloud-backup
+ExecStart=/usr/bin/python3 /opt/my-cloud/scripts/recovery_bundle.py check --target /srv/cloud-rehearsal/repository
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/cloud-rehearsal/repository
+StandardOutput=journal
+StandardError=journal

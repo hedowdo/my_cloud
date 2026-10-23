@@ -1,0 +1,10 @@
+[Unit]
+Description=Check backup age and outcome every fifteen minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=cloud-backup-monitor.service
+
+[Install]
+WantedBy=timers.target

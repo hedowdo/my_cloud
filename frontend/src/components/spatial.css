@@ -1,0 +1,321 @@
+.spatial-shell {
+  border: 1px solid #dce2f1;
+  border-radius: 20px;
+  background: #f3f5fc;
+  overflow: hidden;
+}
+.spatial-tools {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 12px;
+}
+.spatial-tools button {
+  min-width: 44px;
+  min-height: 44px;
+}
+.spatial-tools output {
+  min-width: 48px;
+  text-align: center;
+  font-size: 12px;
+}
+.spatial-guidance {
+  margin: 0;
+  padding: 0 16px 12px;
+  font-size: 12px;
+  color: #52617c;
+}
+.spatial-viewport {
+  position: relative;
+  height: min(65svh, 720px);
+  min-height: 400px;
+  overflow: hidden;
+  touch-action: none;
+  background: radial-gradient(ellipse at center, #e8e9fa77, transparent 65%);
+  cursor: grab;
+}
+.spatial-viewport:active {
+  cursor: grabbing;
+}
+.spatial-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.spatial-lines {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.spatial-lines path {
+  stroke: #a8b4d9;
+  stroke-width: 1;
+  opacity: 0.4;
+}
+.spatial-lines path.active {
+  stroke: #7461ba;
+  stroke-width: 2;
+  opacity: 1;
+}
+.spatial-core {
+  position: absolute;
+  left: -74px;
+  top: -74px;
+  width: 148px;
+  height: 148px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #dce4ff55, #b9adf033, transparent 70%);
+  box-shadow: 0 0 55px #b9adf033;
+  pointer-events: none;
+}
+.spatial-core span {
+  position: absolute;
+  inset: 25px;
+  border: 1px solid #aaa0d9;
+  transform: rotate(45deg);
+  border-radius: 21%;
+  box-shadow:
+    0 0 20px #afbced66,
+    inset 0 0 18px #b9adf033;
+}
+.spatial-core span:nth-child(2) {
+  inset: 37px;
+  transform: rotate(75deg);
+}
+.spatial-core span:nth-child(3) {
+  inset: 50px;
+  transform: rotate(15deg);
+}
+.spatial-core i {
+  position: absolute;
+  inset: 66px;
+  background: #afbee6;
+  box-shadow: 0 0 18px #b9adf0;
+  border-radius: 50%;
+}
+.spatial-node {
+  position: absolute;
+  width: 76px;
+  height: 76px;
+  margin: -38px 0 0 -38px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #3c426a;
+  overflow: visible;
+  touch-action: none;
+  border-radius: 50%;
+  cursor: grab;
+}
+.spatial-node:hover {
+  background: transparent;
+}
+.spatial-node:focus-visible {
+  outline: 3px solid #65509d;
+  outline-offset: 6px;
+}
+.spatial-orb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 76px;
+  width: 76px;
+  border-radius: 26px;
+  background: linear-gradient(145deg, #fcfdff, #dce5fb);
+  border: 1px solid #b9c7e3;
+  box-shadow:
+    0 0 20px #b9adf033,
+    0 7px 14px #566b9b12;
+  font-size: 25px;
+  transition:
+    box-shadow 0.2s,
+    border-color 0.2s;
+}
+.spatial-orb img {
+  max-width: 50px;
+  max-height: 50px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+.spatial-node.selected .spatial-orb,
+.spatial-node:hover .spatial-orb,
+.spatial-node:focus-visible .spatial-orb {
+  border-color: #7560b1;
+  box-shadow: 0 0 25px #a89ada77;
+}
+.spatial-name {
+  position: absolute;
+  top: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  min-width: 100px;
+  max-width: 240px;
+  width: max-content;
+  border-radius: 8px;
+  background: #fff;
+  color: #35405b;
+  border: 1px solid #d7dcec;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.spatial-node:hover .spatial-name,
+.spatial-node:focus-visible .spatial-name,
+.spatial-node.selected .spatial-name {
+  opacity: 1;
+}
+.spatial-node:hover,
+.spatial-node:focus-visible,
+.spatial-node.selected {
+  z-index: 5;
+}
+.spatial-node.animated .spatial-orb {
+  animation: spatial-float 7s ease-in-out infinite;
+  animation-delay: inherit;
+}
+@keyframes spatial-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(0.3deg);
+  }
+}
+.spatial-dragging .spatial-orb,
+.spatial-dense .spatial-orb {
+  animation: none !important;
+}
+.spatial-dense .spatial-orb {
+  box-shadow: none;
+}
+.spatial-empty {
+  position: absolute;
+  top: 65%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  width: 90%;
+  max-width: 360px;
+}
+.spatial-empty h2 {
+  font-size: 20px;
+}
+.spatial-status {
+  min-height: 32px;
+  padding: 6px 16px;
+  font-size: 12px;
+}
+.spatial-conflict {
+  padding: 0 16px 16px;
+}
+[data-theme='dark'] .spatial-shell {
+  background: #182237;
+  border-color: #3d4964;
+}
+[data-theme='dark'] .spatial-guidance {
+  color: #c4cde1;
+}
+[data-theme='dark'] .spatial-orb {
+  background: linear-gradient(145deg, #344569, #25334e);
+  color: #dee5fa;
+  border-color: #7181a5;
+}
+[data-theme='dark'] .spatial-name {
+  color: #e4e8f4;
+  background: #26334d;
+  border-color: #596887;
+}
+[data-theme='dark'] .spatial-node:focus-visible {
+  outline-color: #b9adf0;
+}
+[data-theme='dark'] .spatial-lines path {
+  stroke: #99abdc;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spatial-node.animated .spatial-orb {
+    animation: none;
+  }
+  .spatial-orb {
+    transition: none;
+  }
+}
+@media (max-width: 767px) {
+  .spatial-toggle {
+    display: none;
+  }
+}
+
+.spatial-core i {
+  animation: core-pulse 8s ease-in-out infinite;
+}
+@keyframes core-pulse {
+  50% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spatial-core i {
+    animation: none;
+  }
+}
+
+.browser-content.spatial-layout {
+  grid-template-columns: minmax(0, 1fr) 270px;
+}
+.spatial-intro {
+  padding: 26px 22px;
+  border: 1px solid #dce2f1;
+  border-radius: 18px;
+  align-self: start;
+  color: #52617c;
+}
+.spatial-intro > span {
+  font-size: 36px;
+  color: #7560b1;
+}
+.spatial-intro h2 {
+  font-size: 20px;
+  color: #35405b;
+}
+.spatial-intro p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+[data-theme='dark'] .spatial-intro {
+  color: #c4cde1;
+  border-color: #3d4964;
+}
+[data-theme='dark'] .spatial-intro h2 {
+  color: #e4e8f4;
+}
+@media (max-width: 1150px) {
+  .browser-content.spatial-layout {
+    grid-template-columns: minmax(0, 1fr) 240px;
+  }
+}
+@media (max-width: 900px) {
+  .browser-content.spatial-layout {
+    grid-template-columns: 1fr;
+  }
+  .spatial-intro {
+    display: none;
+  }
+}
+
+.spatial-lines path {
+  fill: none;
+}
+
+.spatial-dense .spatial-core i {
+  animation: none;
+}

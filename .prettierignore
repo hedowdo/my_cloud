@@ -1,0 +1,9 @@
+pnpm-lock.yaml
+uv.lock
+node_modules
+dist
+.venv
+.tools
+.cache
+.local
+docs/evidence

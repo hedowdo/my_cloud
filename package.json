@@ -1,0 +1,19 @@
+{
+  "name": "personal-cloud-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @personal-cloud/frontend dev",
+    "build": "pnpm --filter @personal-cloud/frontend build",
+    "lint": "pnpm --filter @personal-cloud/frontend lint",
+    "test": "pnpm --filter @personal-cloud/frontend test",
+    "format:check": "node scripts/format_frontend.mjs",
+    "format": "node scripts/format_frontend.mjs --write"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
+  }
+}

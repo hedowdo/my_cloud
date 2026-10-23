@@ -1,0 +1,23 @@
+[Unit]
+Description=My Cloud bounded LOCAL backup rehearsal (not native OCI backup)
+ConditionPathExists=/etc/my-cloud/REHEARSAL_ONLY
+
+[Service]
+Type=oneshot
+User=mycloud-backup
+Group=mycloud-backup
+LoadCredential=recovery.key:/etc/my-cloud/rehearsal.key
+ExecStart=/usr/bin/python3 /opt/my-cloud/scripts/recovery_bundle.py run --source /srv/cloud-rehearsal/snapshot --target /srv/cloud-rehearsal/repository --key-file %d/recovery.key --gpg /usr/bin/gpg
+TimeoutStartSec=15min
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadOnlyPaths=/srv/cloud-rehearsal/snapshot
+ReadWritePaths=/srv/cloud-rehearsal/repository
+MemoryMax=512M
+LimitFSIZE=300M
+StandardOutput=journal
+StandardError=journal
